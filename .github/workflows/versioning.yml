@@ -4,16 +4,24 @@ on:
   workflow_call:
     inputs:
       branch:
-        description: 'Target branch (dev or main)'
+        description: 'Target branch (e.g. dev or main)'
         required: true
         type: string
+      push_tag:
+        description: 'Push generated tag to remote repository'
+        required: false
+        type: boolean
+        default: true
     outputs:
       new_tag:
         description: 'Generated version tag'
         value: ${{ jobs.versioning.outputs.new_tag }}
+      changelog_file:
+        description: 'Path to generated changelog file'
+        value: ${{ jobs.versioning.outputs.changelog_file }}
     secrets:
       token:
-        description: 'GitHub token to push tags'
+        description: 'GitHub token with push access'
         required: true
 
 jobs:
@@ -24,34 +32,42 @@ jobs:
       new_tag: ${{ steps.semver.outputs.new_tag }}
       changelog_file: ${{ steps.changelog.outputs.changelog_file }}
     steps:
-      - name: Checkout code
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.token }}
 
-      - name: Checkout semver & changelog scripts
+      - name: Checkout ci-workflows scripts
         uses: actions/checkout@v4
         with:
-          repository: MajkaRecipe/ci-workflows
+          repository: SuikaStudio/ci-workflows
           path: ci-workflows
           token: ${{ secrets.token }}
 
-      - name: Run semver
+      - name: Calculate semantic version
         id: semver
         run: |
           chmod +x ci-workflows/.github/scripts/semver.sh
-          ci-workflows/.github/scripts/semver.sh ${{ inputs.branch }}
+          ci-workflows/.github/scripts/semver.sh "${{ inputs.branch }}"
 
       - name: Generate changelog
         id: changelog
         run: |
           chmod +x ci-workflows/.github/scripts/changelog.sh
-          ci-workflows/.github/scripts/changelog.sh ${{ steps.semver.outputs.prev_dev_tag }}
+          ci-workflows/.github/scripts/changelog.sh "${{ steps.semver.outputs.prev_dev_tag }}"
+
+      - name: Push git tag
+        if: ${{ inputs.push_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.semver.outputs.new_tag }}"
+          git push origin "${{ steps.semver.outputs.new_tag }}"
 
       - name: Upload changelog artifact
         uses: actions/upload-artifact@v4
         with:
           name: changelog
-          path: /tmp/changelog.txt
+          path: ${{ steps.changelog.outputs.changelog_file }}
           retention-days: 1

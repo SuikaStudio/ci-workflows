@@ -8,24 +8,24 @@ DEV_SUFFIX="dev"
 
 # ── Get last production tag (clean, no dev suffix) ────
 LAST_PROD_TAG=$(git tag --list "${TAG_PREFIX}*" \
-  | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" \
+  | grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+$" \
   | sort -V \
-  | tail -n1)
+  | tail -n1 || true)
 
 if [ -z "$LAST_PROD_TAG" ]; then
-  LAST_PROD_TAG="v0.0.0"
+  LAST_PROD_TAG="${TAG_PREFIX}0.0.0"
 fi
 
 echo "Last prod tag: $LAST_PROD_TAG"
 
 # ── Parse major.minor.patch ───────────────────────────
-VERSION="${LAST_PROD_TAG#v}"
+VERSION="${LAST_PROD_TAG#${TAG_PREFIX}}"
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 MINOR=$(echo "$VERSION" | cut -d. -f2)
 PATCH=$(echo "$VERSION" | cut -d. -f3)
 
 # ── Scan commit messages since last prod tag ──────────
-if [ "$LAST_PROD_TAG" = "v0.0.0" ]; then
+if [ "$LAST_PROD_TAG" = "${TAG_PREFIX}0.0.0" ]; then
   COMMIT_MSGS=$(git log HEAD --pretty=format:"%s")
 else
   COMMIT_MSGS=$(git log "${LAST_PROD_TAG}..HEAD" --pretty=format:"%s")
@@ -37,11 +37,11 @@ echo "$COMMIT_MSGS"
 # ── Determine bump type ───────────────────────────────
 BUMP="patch"  # default
 
-if echo "$COMMIT_MSGS" | grep -qE "^(feat|refactor)(\(.+\))?!:|BREAKING CHANGE"; then
+if echo "$COMMIT_MSGS" | grep -qE "^[a-zA-Z0-9_-]+(\(.+\))?!:"; then
   BUMP="major"
 elif echo "$COMMIT_MSGS" | grep -qE "^feat(\(.+\))?:"; then
   BUMP="minor"
-elif echo "$COMMIT_MSGS" | grep -qE "^fix(\(.+\))?:"; then
+elif echo "$COMMIT_MSGS" | grep -qE "^(fix|perf|refactor|docs)(\(.+\))?:"; then
   BUMP="patch"
 fi
 
@@ -66,7 +66,7 @@ else
   # Find the last dev increment for this version
   LAST_DEV=$(git tag --list "${TAG_PREFIX}${NEXT_VERSION}-${DEV_SUFFIX}.*" \
     | sort -V \
-    | tail -n1)
+    | tail -n1 || true)
 
   if [ -z "$LAST_DEV" ]; then
     DEV_NUM=1
@@ -81,15 +81,12 @@ else
 fi
 
 echo "New tag: $NEW_TAG"
-
-# ── Push tag to remote ────────────────────────────────
-if [ "${PUSH_TAG}" != "false" ]; then
-  git config user.name "github-actions[bot]"
-  git config user.email "github-actions[bot]@users.noreply.github.com"
-  git tag "$NEW_TAG"
-  git push origin "$NEW_TAG"
-fi
+echo "Prev dev tag: $PREV_DEV_TAG"
 
 # ── Export outputs for GitHub Actions ─────────────────
-echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
-echo "prev_dev_tag=$PREV_DEV_TAG" >> "$GITHUB_OUTPUT"
+if [ -n "$GITHUB_OUTPUT" ]; then
+  echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+  echo "prev_dev_tag=$PREV_DEV_TAG" >> "$GITHUB_OUTPUT"
+  echo "bump_type=$BUMP" >> "$GITHUB_OUTPUT"
+  echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+fi
